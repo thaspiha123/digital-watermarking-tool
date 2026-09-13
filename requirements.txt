@@ -1,0 +1,5 @@
+opencv-python
+numpy
+PyWavelets
+scikit-image
+streamlit

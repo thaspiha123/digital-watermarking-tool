@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+desktop.ini
+results_old/
