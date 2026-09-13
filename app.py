@@ -101,6 +101,42 @@ def extract_watermark(
 
 
 # ---------------------------------------------------------
+# WATERMARK CORRELATION
+# ---------------------------------------------------------
+def calculate_correlation(original_watermark, extracted_watermark):
+
+    # Convert both images to binary
+    _, original_binary = cv2.threshold(
+        original_watermark,
+        127,
+        1,
+        cv2.THRESH_BINARY
+    )
+
+    _, extracted_binary = cv2.threshold(
+        extracted_watermark,
+        127,
+        1,
+        cv2.THRESH_BINARY
+    )
+
+    # Flatten images
+    original_flat = original_binary.flatten().astype(float)
+    extracted_flat = extracted_binary.flatten().astype(float)
+
+    # Avoid invalid correlation
+    if np.std(original_flat) == 0 or np.std(extracted_flat) == 0:
+        return 0.0
+
+    correlation = np.corrcoef(
+        original_flat,
+        extracted_flat
+    )[0, 1]
+
+    return float(correlation)
+
+
+# ---------------------------------------------------------
 # JPEG COMPRESSION ATTACK
 # ---------------------------------------------------------
 def jpeg_compression_attack(image, quality=50):
@@ -148,6 +184,55 @@ def crop_attack(image, crop_percent=20):
 
 
 # ---------------------------------------------------------
+# GAUSSIAN NOISE ATTACK
+# ---------------------------------------------------------
+def gaussian_noise_attack(image, noise_strength=10):
+
+    noise = np.random.normal(
+        0,
+        noise_strength,
+        image.shape
+    )
+
+    noisy_image = image.astype(np.float32) + noise
+
+    noisy_image = np.clip(
+        noisy_image,
+        0,
+        255
+    ).astype(np.uint8)
+
+    return noisy_image
+
+
+# ---------------------------------------------------------
+# RESIZING ATTACK
+# ---------------------------------------------------------
+def resizing_attack(image, scale=0.5):
+
+    height, width = image.shape
+
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+
+    # Reduce image size
+    resized = cv2.resize(
+        image,
+        (new_width, new_height),
+        interpolation=cv2.INTER_LINEAR
+    )
+
+    # Resize back to original size
+    resized = cv2.resize(
+        resized,
+        (width, height),
+        interpolation=cv2.INTER_LINEAR
+    )
+
+    return resized
+
+
+# ---------------------------------------------------------
 # STREAMLIT PAGE
 # ---------------------------------------------------------
 st.set_page_config(
@@ -186,12 +271,12 @@ watermark_file = st.file_uploader(
 if original_file is not None and watermark_file is not None:
 
     original_bytes = np.asarray(
-        bytearray(original_file.read()),
+        bytearray(original_file.getvalue()),
         dtype=np.uint8
     )
 
     watermark_bytes = np.asarray(
-        bytearray(watermark_file.read()),
+        bytearray(watermark_file.getvalue()),
         dtype=np.uint8
     )
 
@@ -206,9 +291,11 @@ if original_file is not None and watermark_file is not None:
     )
 
     if original_image is None:
+
         st.error("Could not load original image.")
 
     elif original_watermark is None:
+
         st.error("Could not load watermark image.")
 
     else:
@@ -222,6 +309,7 @@ if original_file is not None and watermark_file is not None:
 
         with col1:
             st.subheader("Original Image")
+
             st.image(
                 original_image,
                 use_container_width=True
@@ -229,6 +317,7 @@ if original_file is not None and watermark_file is not None:
 
         with col2:
             st.subheader("Watermark")
+
             st.image(
                 original_watermark,
                 use_container_width=True
@@ -269,6 +358,10 @@ if original_file is not None and watermark_file is not None:
                 original_image
             )
 
+            st.session_state.original_watermark = (
+                original_watermark
+            )
+
             st.session_state.watermark_shape = (
                 original_watermark.shape
             )
@@ -297,16 +390,19 @@ if original_file is not None and watermark_file is not None:
             col1, col2 = st.columns(2)
 
             with col1:
+
                 st.metric(
                     "PSNR",
                     f"{st.session_state.psnr:.2f} dB"
                 )
 
             with col2:
+
                 st.metric(
                     "SSIM",
                     f"{st.session_state.ssim:.4f}"
                 )
+
 
             # Download watermarked image
             success, encoded_image = cv2.imencode(
@@ -315,6 +411,7 @@ if original_file is not None and watermark_file is not None:
             )
 
             if success:
+
                 st.download_button(
                     label="Download Watermarked Image",
                     data=encoded_image.tobytes(),
@@ -340,6 +437,16 @@ if original_file is not None and watermark_file is not None:
                     extracted_watermark
                 )
 
+                correlation = calculate_correlation(
+                    st.session_state.original_watermark,
+                    extracted_watermark
+                )
+
+                st.session_state.normal_correlation = (
+                    correlation
+                )
+
+
             if "extracted_watermark" in st.session_state:
 
                 st.image(
@@ -348,12 +455,18 @@ if original_file is not None and watermark_file is not None:
                     use_container_width=False
                 )
 
+                st.metric(
+                    "Watermark Correlation",
+                    f"{st.session_state.normal_correlation:.4f}"
+                )
+
                 success, encoded_extracted = cv2.imencode(
                     ".png",
                     st.session_state.extracted_watermark
                 )
 
                 if success:
+
                     st.download_button(
                         label="Download Extracted Watermark",
                         data=encoded_extracted.tobytes(),
@@ -395,6 +508,26 @@ if original_file is not None and watermark_file is not None:
 
                 st.session_state.jpeg_image = jpeg_image
 
+                jpeg_extracted = extract_watermark(
+                    st.session_state.original_image,
+                    jpeg_image,
+                    st.session_state.watermark_shape
+                )
+
+                st.session_state.jpeg_extracted = (
+                    jpeg_extracted
+                )
+
+                jpeg_correlation = calculate_correlation(
+                    st.session_state.original_watermark,
+                    jpeg_extracted
+                )
+
+                st.session_state.jpeg_correlation = (
+                    jpeg_correlation
+                )
+
+
             if "jpeg_image" in st.session_state:
 
                 st.image(
@@ -403,27 +536,16 @@ if original_file is not None and watermark_file is not None:
                     use_container_width=True
                 )
 
-                if st.button(
-                    "Extract Watermark After JPEG Attack"
-                ):
+                st.image(
+                    st.session_state.jpeg_extracted,
+                    caption="Watermark Extracted After JPEG Attack",
+                    use_container_width=False
+                )
 
-                    jpeg_extracted = extract_watermark(
-                        st.session_state.original_image,
-                        st.session_state.jpeg_image,
-                        st.session_state.watermark_shape
-                    )
-
-                    st.session_state.jpeg_extracted = (
-                        jpeg_extracted
-                    )
-
-                if "jpeg_extracted" in st.session_state:
-
-                    st.image(
-                        st.session_state.jpeg_extracted,
-                        caption="Watermark Extracted After JPEG Attack",
-                        use_container_width=False
-                    )
+                st.metric(
+                    "JPEG Watermark Correlation",
+                    f"{st.session_state.jpeg_correlation:.4f}"
+                )
 
 
             # -------------------------------------------------
@@ -450,6 +572,26 @@ if original_file is not None and watermark_file is not None:
                     cropped_image
                 )
 
+                cropped_extracted = extract_watermark(
+                    st.session_state.original_image,
+                    cropped_image,
+                    st.session_state.watermark_shape
+                )
+
+                st.session_state.cropped_extracted = (
+                    cropped_extracted
+                )
+
+                cropped_correlation = calculate_correlation(
+                    st.session_state.original_watermark,
+                    cropped_extracted
+                )
+
+                st.session_state.cropped_correlation = (
+                    cropped_correlation
+                )
+
+
             if "cropped_image" in st.session_state:
 
                 st.image(
@@ -458,95 +600,178 @@ if original_file is not None and watermark_file is not None:
                     use_container_width=True
                 )
 
-                if st.button(
-                    "Extract Watermark After Cropping"
-                ):
+                st.image(
+                    st.session_state.cropped_extracted,
+                    caption="Watermark Extracted After Cropping",
+                    use_container_width=False
+                )
 
-                    cropped_extracted = extract_watermark(
-                        st.session_state.original_image,
-                        st.session_state.cropped_image,
-                        st.session_state.watermark_shape
+                st.metric(
+                    "Cropping Watermark Correlation",
+                    f"{st.session_state.cropped_correlation:.4f}"
+                )
+
+
+            # -------------------------------------------------
+            # GAUSSIAN NOISE ATTACK
+            # -------------------------------------------------
+            st.subheader("Gaussian Noise Attack")
+
+            noise_strength = st.slider(
+                "Noise Strength",
+                min_value=5,
+                max_value=40,
+                value=10,
+                step=5
+            )
+
+            if st.button("Apply Gaussian Noise Attack"):
+
+                noisy_image = gaussian_noise_attack(
+                    st.session_state.watermarked_image,
+                    noise_strength
+                )
+
+                st.session_state.noisy_image = (
+                    noisy_image
+                )
+
+                noise_extracted = extract_watermark(
+                    st.session_state.original_image,
+                    noisy_image,
+                    st.session_state.watermark_shape
+                )
+
+                st.session_state.noise_extracted = (
+                    noise_extracted
+                )
+
+                noise_correlation = calculate_correlation(
+                    st.session_state.original_watermark,
+                    noise_extracted
+                )
+
+                st.session_state.noise_correlation = (
+                    noise_correlation
+                )
+
+
+            if "noisy_image" in st.session_state:
+
+                st.image(
+                    st.session_state.noisy_image,
+                    caption="Image with Gaussian Noise",
+                    use_container_width=True
+                )
+
+                st.image(
+                    st.session_state.noise_extracted,
+                    caption="Watermark Extracted After Gaussian Noise",
+                    use_container_width=False
+                )
+
+                st.metric(
+                    "Noise Watermark Correlation",
+                    f"{st.session_state.noise_correlation:.4f}"
+                )
+
+
+            # -------------------------------------------------
+            # RESIZING ATTACK
+            # -------------------------------------------------
+            st.subheader("Resizing Attack")
+
+            resize_scale = st.slider(
+                "Resize Scale",
+                min_value=0.25,
+                max_value=0.75,
+                value=0.50,
+                step=0.25
+            )
+
+            if st.button("Apply Resizing Attack"):
+
+                resized_image = resizing_attack(
+                    st.session_state.watermarked_image,
+                    resize_scale
+                )
+
+                st.session_state.resized_image = (
+                    resized_image
+                )
+
+                resize_extracted = extract_watermark(
+                    st.session_state.original_image,
+                    resized_image,
+                    st.session_state.watermark_shape
+                )
+
+                st.session_state.resize_extracted = (
+                    resize_extracted
+                )
+
+                resize_correlation = calculate_correlation(
+                    st.session_state.original_watermark,
+                    resize_extracted
+                )
+
+                st.session_state.resize_correlation = (
+                    resize_correlation
+                )
+
+
+            if "resized_image" in st.session_state:
+
+                st.image(
+                    st.session_state.resized_image,
+                    caption="Resized Image",
+                    use_container_width=True
+                )
+
+                st.image(
+                    st.session_state.resize_extracted,
+                    caption="Watermark Extracted After Resizing",
+                    use_container_width=False
+                )
+
+                st.metric(
+                    "Resize Watermark Correlation",
+                    f"{st.session_state.resize_correlation:.4f}"
+                )
+
+
+            # -------------------------------------------------
+            # SUMMARY
+            # -------------------------------------------------
+            st.header("7. Performance Summary")
+
+            st.write(
+                "The following values show the quality of "
+                "the watermarked image and watermark recovery."
+            )
+
+            summary_data = {
+                "Metric": [
+                    "PSNR",
+                    "SSIM",
+                    "Normal Extraction Correlation"
+                ],
+                "Value": [
+                    f"{st.session_state.psnr:.2f} dB",
+                    f"{st.session_state.ssim:.4f}",
+                    (
+                        f"{st.session_state.normal_correlation:.4f}"
+                        if "normal_correlation"
+                        in st.session_state
+                        else "Not tested"
                     )
+                ]
+            }
 
-                    st.session_state.cropped_extracted = (
-                        cropped_extracted
-                    )
+            st.table(summary_data)
 
-                if "cropped_extracted" in st.session_state:
-
-                    st.image(
-                        st.session_state.cropped_extracted,
-                        caption="Watermark Extracted After Cropping",
-                        use_container_width=False
-                    )
-
-# GAUSSIAN NOISE ATTACK
-
-def gaussian_noise_attack(image, noise_strength=10):
-
-    noise = np.random.normal(
-        0,
-        noise_strength,
-        image.shape
-    )
-
-    noisy_image = image.astype(np.float32) + noise
-
-    noisy_image = np.clip(
-        noisy_image,
-        0,
-        255
-    ).astype(np.uint8)
-
-    return noisy_imagegit add .git add .
-# -------------------------------------------------
-# GAUSSIAN NOISE ATTACK
-# -------------------------------------------------
-st.subheader("Gaussian Noise Attack")
-
-noise_strength = st.slider(
-    "Noise Strength",
-    min_value=5,
-    max_value=40,
-    value=10,
-    step=5
-)
-
-if st.button("Apply Gaussian Noise Attack"):
-
-    noisy_image = gaussian_noise_attack(
-        st.session_state.watermarked_image,
-        noise_strength
-    )
-
-    st.session_state.noisy_image = noisy_image
-
-if "noisy_image" in st.session_state:
-
-    st.image(
-        st.session_state.noisy_image,
-        caption="Image with Gaussian Noise",
-        use_container_width=True
-    )
-
-    if st.button(
-        "Extract Watermark After Noise Attack"
-    ):
-
-        noise_extracted = extract_watermark(
-            st.session_state.original_image,
-            st.session_state.noisy_image,
-            st.session_state.watermark_shape
-        )
-
-        st.session_state.noise_extracted = (
-            noise_extracted
-        )
-
-    if "noise_extracted" in st.session_state:
-
-        st.image(
-            st.session_state.noise_extracted,
-            caption="Watermark Extracted After Gaussian Noise",
-            use_container_width=False
-        )
+            st.write(
+                "Higher PSNR and SSIM indicate better "
+                "visual quality. A correlation value closer "
+                "to 1 indicates better watermark recovery."
+            )
